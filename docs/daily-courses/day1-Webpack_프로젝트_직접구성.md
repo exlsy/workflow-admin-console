@@ -171,9 +171,13 @@ npm install -D webpack@4 webpack-cli@3 webpack-dev-server@3
 Babel 본체, 프리셋, webpack 연결 로더, 그리고 class properties 플러그인을 설치합니다.
 
 ```bash
-npm install -D @babel/core @babel/preset-env @babel/preset-react babel-loader@8
-npm install -D @babel/plugin-proposal-class-properties
+npm install -D @babel/core@7 @babel/preset-env@7 @babel/preset-react@7 babel-loader@8
+npm install -D @babel/plugin-proposal-class-properties@7
 ```
+
+> ⚠️ **버전 `@7` 고정이 중요합니다.** 생략하면 최근 출시된 Babel 8이 설치되어 `babel-loader@8`과 `ERESOLVE` 충돌이 납니다. 이 프로젝트는 구형 스택(Webpack 4 + babel-loader 8)이라 Babel 7이 정답이며, `--force`나 `--legacy-peer-deps`로 우회하지 않습니다.
+>
+> zsh에서는 `@^7`의 `^`를 glob으로 해석해 `zsh: no matches found` 오류가 납니다. 위처럼 `@7`을 쓰거나, 캐럿을 쓰려면 `"@babel/core@^7"`처럼 따옴표로 감싸세요.
 
 - `@babel/core` — Babel 엔진
 - `@babel/preset-env` — 최신 JS → 구형 JS 변환 규칙
@@ -207,12 +211,14 @@ npm install -D @babel/plugin-proposal-class-properties
 번들에 CSS와 이미지를 포함시키고, HTML을 자동 생성하기 위한 로더/플러그인입니다.
 
 ```bash
-# 스타일/이미지 로더
-npm install -D css-loader style-loader file-loader url-loader
+# 스타일/이미지 로더 (Webpack 4 호환 버전으로 고정)
+npm install -D css-loader@5 style-loader@2 file-loader@6 url-loader@4
 
 # HTML 생성 + dist 정리 플러그인
 npm install -D html-webpack-plugin@4 clean-webpack-plugin@3
 ```
+
+> ⚠️ **로더 버전 고정이 중요합니다.** 버전을 생략하면 `style-loader@4`/`css-loader@6` 등 Webpack 5 전용 최신 버전이 설치되어 `peer webpack@^5` 충돌(`ERESOLVE`)이 납니다. 이 프로젝트는 Webpack 4이므로 위처럼 webpack 4 호환 마지막 메이저로 고정합니다.
 
 - `css-loader` — `import './x.css'`를 JS가 이해하는 형태로 읽어들임
 - `style-loader` — 읽어들인 CSS를 실행 시 `<style>` 태그로 DOM에 주입
@@ -257,9 +263,14 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
 
+// production 빌드에서만 contenthash를 사용한다.
+// webpack-dev-server 3 + HMR 조합은 [contenthash]/[chunkhash]를 지원하지 않으므로
+// 개발 모드에서는 해시 없는 고정 파일명(bundle.js)을 쓴다.
+const isProd = process.env.NODE_ENV === 'production';
+
 module.exports = {
   // 빌드 모드: development(빠른 빌드/디버깅) 또는 production(최적화/압축)
-  mode: process.env.NODE_ENV || 'development',
+  mode: isProd ? 'production' : 'development',
 
   // 의존성 추적을 시작할 진입점
   entry: './src/index.jsx',
@@ -267,7 +278,7 @@ module.exports = {
   // 번들 결과물 출력 설정
   output: {
     path: path.resolve(__dirname, 'dist'),   // 절대 경로로 dist 폴더 지정
-    filename: 'bundle.[contenthash].js',      // 내용이 바뀔 때만 파일명 해시 변경 (캐싱 최적화)
+    filename: isProd ? 'bundle.[contenthash].js' : 'bundle.js', // dev는 해시 없이, prod만 캐싱용 해시
     publicPath: '/',                          // 브라우저가 번들/자원을 찾을 기준 경로
   },
 
@@ -340,7 +351,7 @@ module.exports = {
 - **mode** — `development`는 빠르고 읽기 쉬운 번들, `production`은 압축·최적화된 번들
 - **entry** — 시작 파일(`src/index.jsx`)
 - **output.path** — 결과 폴더(반드시 절대 경로라 `path.resolve` 사용)
-- **output.filename** — `[contenthash]`로 내용 기반 캐싱
+- **output.filename** — production에서만 `[contenthash]`로 내용 기반 캐싱, 개발 모드는 `bundle.js` (webpack-dev-server 3은 HMR과 `[contenthash]`를 함께 못 쓰기 때문)
 - **output.publicPath: '/'** — 아래 4장에서 별도로 설명
 - **resolve.alias `@`** — `import ... from '@/...'`로 `src` 기준 절대 import(상대경로 `../../..` 지옥 방지)
 - **module.rules** — 확장자별 변환 담당 로더 지정
@@ -473,7 +484,17 @@ npm run build
 - **원인**: 전역 설치를 기대했거나 의존성 설치 누락.
 - **해결**: webpack은 로컬(devDependencies)에 설치하고 **npm scripts를 통해** 실행합니다. `node_modules`가 없다면 `npm install`을 다시 실행.
 
-### 5.5 `mode` 관련 경고
+### 5.5 `Entry module not found: Can't resolve './src/index.jsx'`
+
+- **원인**: 진입점 파일(`src/index.jsx`)을 아직 만들지 않고 `npm start`를 실행함. Step 9를 건너뛰면 발생합니다.
+- **해결**: `src/index.jsx`, `src/App.jsx`, `src/styles/global.css`를 모두 생성했는지 확인. 파일명·경로 오타(`index.js` vs `index.jsx`)도 점검.
+
+### 5.6 `Cannot use [chunkhash] or [contenthash] for chunk ... (use [hash] instead)`
+
+- **원인**: webpack-dev-server 3 + HMR(`hot: true`) 환경에서는 `output.filename`에 `[contenthash]`/`[chunkhash]`를 쓸 수 없습니다.
+- **해결**: 위 설정처럼 `filename`을 개발 모드에서는 `bundle.js`(해시 없음), production에서만 `[contenthash]`가 되도록 `isProd`로 분기합니다. 설정을 바꾼 뒤에는 **dev-server를 껐다 다시 실행**해야 반영됩니다(설정 변경은 자동 반영 안 됨).
+
+### 5.7 `mode` 관련 경고
 
 - `webpack.config.js`의 `mode`와 CLI의 `--mode`가 함께 있어도 CLI가 우선 적용되어 정상 동작합니다. 경고가 신경 쓰이면 한쪽만 남겨도 됩니다.
 
